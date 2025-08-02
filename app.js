@@ -53,6 +53,9 @@ class HandTrackingDrawingApp {
         this.lastDrawTime = 0;
         this.isRedrawing = false;
         this.showHandTracking = false; // 默认不显示手部追踪，提高性能
+        this.handTrackingPending = false; // 防止重复调度
+        this.lastClearTime = 0; // 防止频繁清除画布
+        this.lastGestureTime = 0; // 手势检测节流
 
         // 画布尺寸设置
         this.resizeCanvases();
@@ -327,18 +330,22 @@ class HandTrackingDrawingApp {
 
     startHandTracking() {
         let lastProcessTime = 0;
-        const processInterval = 50; // 限制处理间隔为50ms (20fps)
+        const processInterval = 33; // 提升到30fps处理频率，保持响应性
         
         const camera = new Camera(this.videoElement, {
             onFrame: async () => {
                 const now = Date.now();
-                // 限制MediaPipe处理频率
+                // 限制MediaPipe处理频率，但保持足够的响应性
                 if (now - lastProcessTime >= processInterval) {
-                    await this.hands.send({ image: this.videoElement });
-                    lastProcessTime = now;
+                    try {
+                        await this.hands.send({ image: this.videoElement });
+                        lastProcessTime = now;
+                    } catch (error) {
+                        console.warn('MediaPipe处理错误:', error);
+                    }
                 }
             },
-            width: 640, // 降低处理分辨率
+            width: 640, // 保持较低分辨率以提高性能
             height: 480
         });
         camera.start();
@@ -350,26 +357,17 @@ class HandTrackingDrawingApp {
             this.performanceMetrics.frameCount++;
         }
         
-        // 更激进的节流处理：限制重绘频率，减少闪烁
+        // 减少节流限制，提高响应性
         const now = Date.now();
-        if (this.lastDrawTime && (now - this.lastDrawTime) < 50) { // 降低到20fps
+        if (this.lastDrawTime && (now - this.lastDrawTime) < 16) { // 提升到60fps响应
             return;
         }
         this.lastDrawTime = now;
         
-        // 只在需要时清除画布
-        const needsRedraw = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
+        // 处理手部检测
+        const hasHands = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
         
-        if (needsRedraw) {
-            // 只有启用追踪显示时才重绘手部标注
-            if (this.showHandTracking && !this.isRedrawing) {
-                this.isRedrawing = true;
-                requestAnimationFrame(() => {
-                    this.drawHandAnnotations(results);
-                    this.isRedrawing = false;
-                });
-            }
-            
+        if (hasHands) {
             this.isHandDetected = true;
             this.handLandmarks = results.multiHandLandmarks[0];
             this.handStatus.textContent = '手部检测: 正常';
@@ -380,20 +378,40 @@ class HandTrackingDrawingApp {
             // 处理绘画逻辑
             this.handleDrawing();
             
+            // 只有启用追踪显示时才重绘手部标注，且使用防抖
+            if (this.showHandTracking) {
+                this.scheduleHandTracking(results);
+            }
+            
         } else {
             // 只在状态改变时更新
             if (this.isHandDetected) {
-                if (this.showHandTracking) {
-                    this.clearHandAnnotations();
-                }
                 this.isHandDetected = false;
                 this.handLandmarks = null;
                 this.handStatus.textContent = '等待手部检测...';
                 this.gestureStatus.textContent = '手势: 无';
                 this.cursor.style.display = 'none';
                 this.stopDrawing();
+                
+                // 清除手部追踪显示
+                if (this.showHandTracking) {
+                    this.clearHandAnnotations();
+                }
             }
         }
+    }
+
+    // 新的手部追踪调度器，防止频繁重绘
+    scheduleHandTracking(results) {
+        if (this.handTrackingPending) return;
+        
+        this.handTrackingPending = true;
+        setTimeout(() => {
+            if (this.showHandTracking && this.isHandDetected) {
+                this.drawHandAnnotations(results);
+            }
+            this.handTrackingPending = false;
+        }, 100); // 降低手部追踪显示频率到10fps
     }
 
     drawHandAnnotations(results) {
@@ -419,14 +437,25 @@ class HandTrackingDrawingApp {
     }
 
     clearHandAnnotations() {
-        // 使用requestAnimationFrame优化清除操作
-        requestAnimationFrame(() => {
-            this.videoCtx.clearRect(0, 0, this.videoCanvas.width, this.videoCanvas.height);
-        });
+        // 避免频繁清除，只在必要时清除
+        if (this.lastClearTime && (Date.now() - this.lastClearTime) < 100) {
+            return;
+        }
+        
+        this.lastClearTime = Date.now();
+        // 使用高效的清除方法
+        this.videoCtx.clearRect(0, 0, this.videoCanvas.width, this.videoCanvas.height);
     }
 
     detectGesture() {
         if (!this.handLandmarks) return;
+        
+        // 手势检测也需要节流，避免过度计算
+        const now = Date.now();
+        if (this.lastGestureTime && (now - this.lastGestureTime) < 100) {
+            return;
+        }
+        this.lastGestureTime = now;
         
         const landmarks = this.handLandmarks;
         
@@ -542,20 +571,20 @@ class HandTrackingDrawingApp {
             this.isDrawing = true;
             this.lastDrawPoint = { x, y };
             this.cursor.classList.add(this.currentTool === 'eraser' ? 'erasing' : 'drawing');
+            
+            // 绘制起始点
+            this.drawPoint(x, y);
         } else {
             this.draw(x, y);
         }
     }
 
-    draw(x, y) {
-        if (!this.isDrawing || !this.lastDrawPoint) return;
-        
+    drawPoint(x, y) {
+        // 绘制单点，防止空白
         this.drawingCtx.globalCompositeOperation = 
             this.currentTool === 'eraser' ? 'destination-out' : 'source-over';
         
-        // 增强绘画可见性：添加描边效果
         if (this.currentTool === 'brush') {
-            // 绘制带描边的线条，提高在摄像头背景上的可见性
             this.drawingCtx.strokeStyle = this.currentBrushColor;
             this.drawingCtx.lineWidth = this.currentBrushSize;
             this.drawingCtx.shadowColor = 'rgba(255, 255, 255, 0.8)';
@@ -563,7 +592,6 @@ class HandTrackingDrawingApp {
             this.drawingCtx.shadowOffsetX = 1;
             this.drawingCtx.shadowOffsetY = 1;
         } else {
-            // 橡皮擦不需要阴影
             this.drawingCtx.shadowColor = 'transparent';
             this.drawingCtx.shadowBlur = 0;
             this.drawingCtx.shadowOffsetX = 0;
@@ -572,8 +600,48 @@ class HandTrackingDrawingApp {
         }
         
         this.drawingCtx.beginPath();
+        this.drawingCtx.arc(x, y, this.currentBrushSize / 2, 0, Math.PI * 2);
+        this.drawingCtx.fill();
+    }
+
+    draw(x, y) {
+        if (!this.isDrawing || !this.lastDrawPoint) return;
+        
+        // 计算距离，避免过密的点
+        const dx = x - this.lastDrawPoint.x;
+        const dy = y - this.lastDrawPoint.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // 如果移动距离太小，跳过绘制，避免卡顿
+        if (distance < 2) return;
+        
+        this.drawingCtx.globalCompositeOperation = 
+            this.currentTool === 'eraser' ? 'destination-out' : 'source-over';
+        
+        // 增强绘画可见性：添加描边效果
+        if (this.currentTool === 'brush') {
+            this.drawingCtx.strokeStyle = this.currentBrushColor;
+            this.drawingCtx.lineWidth = this.currentBrushSize;
+            this.drawingCtx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+            this.drawingCtx.shadowBlur = 2;
+            this.drawingCtx.shadowOffsetX = 1;
+            this.drawingCtx.shadowOffsetY = 1;
+        } else {
+            this.drawingCtx.shadowColor = 'transparent';
+            this.drawingCtx.shadowBlur = 0;
+            this.drawingCtx.shadowOffsetX = 0;
+            this.drawingCtx.shadowOffsetY = 0;
+            this.drawingCtx.lineWidth = this.currentBrushSize;
+        }
+        
+        // 使用二次贝塞尔曲线实现平滑绘制
+        this.drawingCtx.beginPath();
         this.drawingCtx.moveTo(this.lastDrawPoint.x, this.lastDrawPoint.y);
-        this.drawingCtx.lineTo(x, y);
+        
+        const midX = (this.lastDrawPoint.x + x) / 2;
+        const midY = (this.lastDrawPoint.y + y) / 2;
+        this.drawingCtx.quadraticCurveTo(this.lastDrawPoint.x, this.lastDrawPoint.y, midX, midY);
+        
         this.drawingCtx.stroke();
         
         this.lastDrawPoint = { x, y };

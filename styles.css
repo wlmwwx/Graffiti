@@ -187,8 +187,8 @@ body {
     cursor: crosshair;
     z-index: 3;
     /* 绘画层不需要镜像，让用户正常绘制 */
-    /* 添加轻微的背景以提高绘画可见性 */
-    background: rgba(255, 255, 255, 0.05);
+    /* 移除背景，完全透明以避免白屏 */
+    background: transparent;
 }
 
 .status-indicator {
