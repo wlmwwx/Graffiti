@@ -1,0 +1,30 @@
+{
+  "name": "hand-tracking-drawing-app",
+  "version": "1.0.0",
+  "description": "基于MediaPipe手部追踪的网页画图应用",
+  "main": "index.html",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "serve": "npx serve .",
+    "deploy": "git add . && git commit -m 'Update' && git push"
+  },
+  "keywords": [
+    "hand-tracking",
+    "drawing",
+    "mediapipe",
+    "canvas",
+    "webcam",
+    "gesture-recognition"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/hand-tracking-drawing"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
