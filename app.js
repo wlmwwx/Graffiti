@@ -23,6 +23,7 @@ class HandTrackingDrawingApp {
         this.toolButtons = document.querySelectorAll('.tool-btn[data-tool]');
         this.clearButton = document.getElementById('clearCanvas');
         this.saveButton = document.getElementById('saveImage');
+        this.toggleTrackingButton = document.getElementById('toggleTracking');
 
         // 状态显示元素
         this.handStatus = document.getElementById('handStatus');
@@ -47,6 +48,11 @@ class HandTrackingDrawingApp {
         this.currentGesture = 'none';
         this.gestureStartTime = 0;
         this.gestureStableTime = 200; // 手势稳定时间（毫秒）
+
+        // 性能优化变量
+        this.lastDrawTime = 0;
+        this.isRedrawing = false;
+        this.showHandTracking = false; // 默认不显示手部追踪，提高性能
 
         // 画布尺寸设置
         this.resizeCanvases();
@@ -127,6 +133,11 @@ class HandTrackingDrawingApp {
             this.saveImage();
         });
 
+        // 切换手部追踪显示
+        this.toggleTrackingButton.addEventListener('click', () => {
+            this.toggleHandTracking();
+        });
+
         // 错误弹窗控制
         this.errorModal = document.getElementById('errorModal');
         this.errorMessage = document.getElementById('errorMessage');
@@ -178,9 +189,10 @@ class HandTrackingDrawingApp {
 
             this.hands.setOptions({
                 maxNumHands: 1,
-                modelComplexity: 1,
-                minDetectionConfidence: 0.7,
-                minTrackingConfidence: 0.5
+                modelComplexity: 0, // 降低模型复杂度，提高性能
+                minDetectionConfidence: 0.8, // 提高检测阈值，减少误检
+                minTrackingConfidence: 0.7, // 提高追踪阈值，更稳定
+                selfieMode: true // 启用自拍模式，提高镜像体验
             });
 
             this.hands.onResults((results) => this.onHandResults(results));
@@ -209,11 +221,12 @@ class HandTrackingDrawingApp {
             // 先检查权限状态
             await this.checkCameraPermission();
 
-            // 请求摄像头权限
+            // 请求摄像头权限，降低分辨率和帧率
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
+                    width: { ideal: 640 }, // 降低分辨率
+                    height: { ideal: 480 }, // 降低分辨率
+                    frameRate: { ideal: 15, max: 20 }, // 限制帧率
                     facingMode: 'user'
                 }
             });
@@ -313,12 +326,20 @@ class HandTrackingDrawingApp {
     }
 
     startHandTracking() {
+        let lastProcessTime = 0;
+        const processInterval = 50; // 限制处理间隔为50ms (20fps)
+        
         const camera = new Camera(this.videoElement, {
             onFrame: async () => {
-                await this.hands.send({ image: this.videoElement });
+                const now = Date.now();
+                // 限制MediaPipe处理频率
+                if (now - lastProcessTime >= processInterval) {
+                    await this.hands.send({ image: this.videoElement });
+                    lastProcessTime = now;
+                }
             },
-            width: 1280,
-            height: 720
+            width: 640, // 降低处理分辨率
+            height: 480
         });
         camera.start();
     }
@@ -329,16 +350,29 @@ class HandTrackingDrawingApp {
             this.performanceMetrics.frameCount++;
         }
         
-        // 清除之前的手部标注
-        this.videoCtx.clearRect(0, 0, this.videoCanvas.width, this.videoCanvas.height);
+        // 更激进的节流处理：限制重绘频率，减少闪烁
+        const now = Date.now();
+        if (this.lastDrawTime && (now - this.lastDrawTime) < 50) { // 降低到20fps
+            return;
+        }
+        this.lastDrawTime = now;
         
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        // 只在需要时清除画布
+        const needsRedraw = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
+        
+        if (needsRedraw) {
+            // 只有启用追踪显示时才重绘手部标注
+            if (this.showHandTracking && !this.isRedrawing) {
+                this.isRedrawing = true;
+                requestAnimationFrame(() => {
+                    this.drawHandAnnotations(results);
+                    this.isRedrawing = false;
+                });
+            }
+            
             this.isHandDetected = true;
             this.handLandmarks = results.multiHandLandmarks[0];
             this.handStatus.textContent = '手部检测: 正常';
-            
-            // 绘制手部关键点
-            this.drawHandLandmarks();
             
             // 检测手势
             this.detectGesture();
@@ -347,29 +381,47 @@ class HandTrackingDrawingApp {
             this.handleDrawing();
             
         } else {
-            this.isHandDetected = false;
-            this.handLandmarks = null;
-            this.handStatus.textContent = '等待手部检测...';
-            this.gestureStatus.textContent = '手势: 无';
-            this.cursor.style.display = 'none';
-            this.stopDrawing();
+            // 只在状态改变时更新
+            if (this.isHandDetected) {
+                if (this.showHandTracking) {
+                    this.clearHandAnnotations();
+                }
+                this.isHandDetected = false;
+                this.handLandmarks = null;
+                this.handStatus.textContent = '等待手部检测...';
+                this.gestureStatus.textContent = '手势: 无';
+                this.cursor.style.display = 'none';
+                this.stopDrawing();
+            }
         }
     }
 
-    drawHandLandmarks() {
-        if (!this.handLandmarks) return;
+    drawHandAnnotations(results) {
+        // 清除之前的手部标注
+        this.videoCtx.clearRect(0, 0, this.videoCanvas.width, this.videoCanvas.height);
         
-        // 绘制手部连接线
-        drawConnectors(this.videoCtx, this.handLandmarks, HAND_CONNECTIONS, {
-            color: '#00FF00',
-            lineWidth: 2
-        });
-        
-        // 绘制关键点
-        drawLandmarks(this.videoCtx, this.handLandmarks, {
-            color: '#FF0000',
-            lineWidth: 1,
-            radius: 3
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const landmarks = results.multiHandLandmarks[0];
+            
+            // 绘制手部连接线
+            drawConnectors(this.videoCtx, landmarks, HAND_CONNECTIONS, {
+                color: '#00FF00',
+                lineWidth: 2
+            });
+            
+            // 绘制关键点
+            drawLandmarks(this.videoCtx, landmarks, {
+                color: '#FF0000',
+                lineWidth: 1,
+                radius: 3
+            });
+        }
+    }
+
+    clearHandAnnotations() {
+        // 使用requestAnimationFrame优化清除操作
+        requestAnimationFrame(() => {
+            this.videoCtx.clearRect(0, 0, this.videoCanvas.width, this.videoCanvas.height);
         });
     }
 
@@ -813,6 +865,23 @@ class HandTrackingDrawingApp {
         
         document.body.appendChild(button);
         return button;
+    }
+
+    // 切换手部追踪显示
+    toggleHandTracking() {
+        this.showHandTracking = !this.showHandTracking;
+        
+        if (this.showHandTracking) {
+            this.toggleTrackingButton.textContent = '隐藏追踪';
+            this.toggleTrackingButton.style.background = 'linear-gradient(135deg, #FF5722, #E64A19)';
+        } else {
+            this.toggleTrackingButton.textContent = '显示追踪';
+            this.toggleTrackingButton.style.background = 'linear-gradient(135deg, #4CAF50, #45a049)';
+            // 清除当前的手部标注
+            this.clearHandAnnotations();
+        }
+        
+        console.log('手部追踪显示:', this.showHandTracking ? '开启' : '关闭');
     }
 }
 
