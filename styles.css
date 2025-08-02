@@ -137,14 +137,18 @@ body {
 .main-content {
     display: flex;
     flex: 1;
-    gap: 20px;
+    justify-content: center;
+    align-items: center;
     padding: 20px;
 }
 
-/* 视频容器 */
-.video-container {
+/* 摄像头绘画容器 */
+.camera-drawing-container {
     position: relative;
-    flex: 1;
+    width: 90vw;
+    height: 70vh;
+    max-width: 1200px;
+    max-height: 800px;
     background: rgba(255, 255, 255, 0.9);
     border-radius: 15px;
     overflow: hidden;
@@ -153,10 +157,14 @@ body {
 }
 
 #videoElement {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
     transform: scaleX(-1); /* 镜像翻转 */
+    z-index: 1;
 }
 
 #videoCanvas {
@@ -167,6 +175,20 @@ body {
     height: 100%;
     pointer-events: none;
     transform: scaleX(-1); /* 镜像翻转 */
+    z-index: 2;
+}
+
+#drawingCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+    z-index: 3;
+    /* 绘画层不需要镜像，让用户正常绘制 */
+    /* 添加轻微的背景以提高绘画可见性 */
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .status-indicator {
@@ -179,30 +201,10 @@ body {
     border-radius: 10px;
     font-size: 14px;
     backdrop-filter: blur(10px);
+    z-index: 4;
 }
 
-.hand-status, .gesture-status {
-    margin: 2px 0;
-}
-
-/* 画布容器 */
-.canvas-container {
-    position: relative;
-    flex: 1;
-    background: white;
-    border-radius: 15px;
-    overflow: hidden;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-}
-
-#drawingCanvas {
-    width: 100%;
-    height: 100%;
-    cursor: crosshair;
-    background: white;
-}
-
-.canvas-info {
+.drawing-info {
     position: absolute;
     bottom: 15px;
     right: 15px;
@@ -212,6 +214,7 @@ body {
     border-radius: 10px;
     font-size: 14px;
     backdrop-filter: blur(10px);
+    z-index: 4;
 }
 
 #currentColor {
@@ -222,6 +225,10 @@ body {
     vertical-align: middle;
     margin-left: 5px;
     border: 2px solid white;
+}
+
+.hand-status, .gesture-status {
+    margin: 2px 0;
 }
 
 /* 手势指南 */
@@ -285,6 +292,12 @@ body {
     
     .main-content {
         flex-direction: column;
+        padding: 10px;
+    }
+    
+    .camera-drawing-container {
+        width: 95vw;
+        height: 60vh;
     }
 }
 
@@ -301,12 +314,26 @@ body {
     
     .main-content {
         padding: 10px;
-        gap: 10px;
     }
     
-    .video-container,
-    .canvas-container {
+    .camera-drawing-container {
+        width: 95vw;
+        height: 50vh;
         min-height: 300px;
+    }
+    
+    .status-indicator {
+        top: 10px;
+        left: 10px;
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+    
+    .drawing-info {
+        bottom: 10px;
+        right: 10px;
+        padding: 8px 12px;
+        font-size: 12px;
     }
 }
 

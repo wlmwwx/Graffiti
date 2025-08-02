@@ -50,7 +50,11 @@ class HandTrackingDrawingApp {
 
         // 画布尺寸设置
         this.resizeCanvases();
-        window.addEventListener('resize', () => this.resizeCanvases());
+        this.optimizeCanvasSize();
+        window.addEventListener('resize', () => {
+            this.resizeCanvases();
+            this.optimizeCanvasSize();
+        });
 
         // 创建虚拟光标
         this.createVirtualCursor();
@@ -64,20 +68,25 @@ class HandTrackingDrawingApp {
     }
 
     resizeCanvases() {
-        const videoContainer = document.querySelector('.video-container');
-        const canvasContainer = document.querySelector('.canvas-container');
+        const container = document.querySelector('.camera-drawing-container');
         
-        // 设置视频画布尺寸
-        this.videoCanvas.width = videoContainer.clientWidth;
-        this.videoCanvas.height = videoContainer.clientHeight;
+        // 设置所有画布为相同尺寸
+        const width = container.clientWidth;
+        const height = container.clientHeight;
         
-        // 设置绘画画布尺寸
-        this.drawingCanvas.width = canvasContainer.clientWidth;
-        this.drawingCanvas.height = canvasContainer.clientHeight;
+        // 视频画布 (手部追踪显示)
+        this.videoCanvas.width = width;
+        this.videoCanvas.height = height;
+        
+        // 绘画画布 (用户绘画)
+        this.drawingCanvas.width = width;
+        this.drawingCanvas.height = height;
         
         // 设置绘画上下文属性
         this.drawingCtx.lineCap = 'round';
         this.drawingCtx.lineJoin = 'round';
+        
+        console.log(`画布尺寸设置为: ${width}x${height}`);
     }
 
     initializeEventListeners() {
@@ -430,24 +439,27 @@ class HandTrackingDrawingApp {
         
         const indexTip = this.handLandmarks[8];
         
-        // 将手部坐标转换为画布坐标
-        const canvasRect = this.drawingCanvas.getBoundingClientRect();
-        const videoRect = this.videoCanvas.getBoundingClientRect();
+        // 获取容器尺寸
+        const container = document.querySelector('.camera-drawing-container');
+        const containerRect = container.getBoundingClientRect();
         
-        // 由于视频是镜像的，需要翻转x坐标
-        const x = canvasRect.left + (1 - indexTip.x) * canvasRect.width;
-        const y = canvasRect.top + indexTip.y * canvasRect.height;
+        // 由于视频是镜像的，但绘画不镜像，需要正确转换坐标
+        // 视频坐标: 0(左) -> 1(右)，转换为绘画坐标: 0(左) -> width(右) (不镜像)
+        const x = indexTip.x * containerRect.width;
+        const y = indexTip.y * containerRect.height;
         
-        // 更新虚拟光标位置
-        this.updateCursorPosition(x, y);
+        // 更新虚拟光标位置 (相对于屏幕的绝对位置)
+        const screenX = containerRect.left + x;
+        const screenY = containerRect.top + y;
+        this.updateCursorPosition(screenX, screenY);
         
-        // 根据手势执行相应动作
+        // 根据手势执行相应动作 (使用容器内的相对坐标)
         switch (this.currentGesture) {
             case 'point':
-                this.startDrawing(x - canvasRect.left, y - canvasRect.top);
+                this.startDrawing(x, y);
                 break;
             case 'peace':
-                this.handleClick(x - canvasRect.left, y - canvasRect.top);
+                this.handleClick(x, y);
                 break;
             case 'open':
             case 'fist':
@@ -489,8 +501,23 @@ class HandTrackingDrawingApp {
         this.drawingCtx.globalCompositeOperation = 
             this.currentTool === 'eraser' ? 'destination-out' : 'source-over';
         
-        this.drawingCtx.strokeStyle = this.currentBrushColor;
-        this.drawingCtx.lineWidth = this.currentBrushSize;
+        // 增强绘画可见性：添加描边效果
+        if (this.currentTool === 'brush') {
+            // 绘制带描边的线条，提高在摄像头背景上的可见性
+            this.drawingCtx.strokeStyle = this.currentBrushColor;
+            this.drawingCtx.lineWidth = this.currentBrushSize;
+            this.drawingCtx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+            this.drawingCtx.shadowBlur = 2;
+            this.drawingCtx.shadowOffsetX = 1;
+            this.drawingCtx.shadowOffsetY = 1;
+        } else {
+            // 橡皮擦不需要阴影
+            this.drawingCtx.shadowColor = 'transparent';
+            this.drawingCtx.shadowBlur = 0;
+            this.drawingCtx.shadowOffsetX = 0;
+            this.drawingCtx.shadowOffsetY = 0;
+            this.drawingCtx.lineWidth = this.currentBrushSize;
+        }
         
         this.drawingCtx.beginPath();
         this.drawingCtx.moveTo(this.lastDrawPoint.x, this.lastDrawPoint.y);
@@ -507,13 +534,9 @@ class HandTrackingDrawingApp {
     }
 
     handleClick(x, y) {
-        // 检查是否点击了颜色选择器或工具按钮
-        const colorOptions = document.elementsFromPoint(x, y)
-            .find(el => el.classList.contains('color-option'));
-        
-        if (colorOptions) {
-            colorOptions.click();
-        }
+        // 和平手势用于点击工具栏，这里暂时不处理画布内的点击
+        // 可以在未来扩展为选择工具等功能
+        console.log(`点击位置: ${x}, ${y}`);
     }
 
     switchTool(tool) {
@@ -729,11 +752,12 @@ class HandTrackingDrawingApp {
 
     // 优化画布尺寸
     optimizeCanvasSize() {
+        const container = document.querySelector('.camera-drawing-container');
         const maxWidth = 1920;
         const maxHeight = 1080;
         
-        let width = this.drawingCanvas.clientWidth;
-        let height = this.drawingCanvas.clientHeight;
+        let width = container.clientWidth;
+        let height = container.clientHeight;
         
         if (width > maxWidth) {
             height = height * (maxWidth / width);
@@ -745,8 +769,13 @@ class HandTrackingDrawingApp {
             height = maxHeight;
         }
         
+        // 应用优化后的尺寸
+        this.videoCanvas.width = width;
+        this.videoCanvas.height = height;
         this.drawingCanvas.width = width;
         this.drawingCanvas.height = height;
+        
+        console.log(`优化后画布尺寸: ${width}x${height}`);
     }
 
     // 显示权限状态

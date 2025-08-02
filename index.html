@@ -65,22 +65,22 @@
 
         <!-- 主要内容区域 -->
         <main class="main-content">
-            <!-- 摄像头视频流 -->
-            <div class="video-container">
+            <!-- 摄像头绘画区域 -->
+            <div class="camera-drawing-container">
                 <video id="videoElement" autoplay muted playsinline></video>
                 <canvas id="videoCanvas"></canvas>
+                <canvas id="drawingCanvas"></canvas>
+                
+                <!-- 状态指示器 -->
                 <div class="status-indicator">
                     <div id="handStatus" class="hand-status">等待手部检测...</div>
                     <div id="gestureStatus" class="gesture-status">手势: 无</div>
                 </div>
-            </div>
-
-            <!-- 画布区域 -->
-            <div class="canvas-container">
-                <canvas id="drawingCanvas"></canvas>
-                <div class="canvas-info">
-                    <div class="current-tool">当前工具: <span id="currentTool">画笔</span></div>
-                    <div class="current-color">当前颜色: <span id="currentColor" style="background-color: #000000;"></span></div>
+                
+                <!-- 绘画信息 -->
+                <div class="drawing-info">
+                    <div class="current-tool">工具: <span id="currentTool">画笔</span></div>
+                    <div class="current-color">颜色: <span id="currentColor" style="background-color: #000000;"></span></div>
                 </div>
             </div>
         </main>
