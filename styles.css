@@ -149,7 +149,7 @@ body {
   height: 70vh;
   max-width: 1200px;
   max-height: 800px;
-  background: rgba(255, 255, 255, 0.9);
+  background: transparent; /* 修复：移除白色背景，让视频可见 */
   border-radius: 15px;
   overflow: hidden;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);

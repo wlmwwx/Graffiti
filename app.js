@@ -107,19 +107,28 @@ class HandTrackingDrawingApp {
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // 视频画布 (手部追踪显示)
-    this.videoCanvas.width = width;
-    this.videoCanvas.height = height;
+    // 避免频繁重置画布尺寸导致闪烁
+    if (
+      this.videoCanvas.width !== width ||
+      this.videoCanvas.height !== height
+    ) {
+      // 视频画布 (手部追踪显示)
+      this.videoCanvas.width = width;
+      this.videoCanvas.height = height;
 
-    // 绘画画布 (用户绘画)
-    this.drawingCanvas.width = width;
-    this.drawingCanvas.height = height;
+      // 绘画画布 (用户绘画)
+      this.drawingCanvas.width = width;
+      this.drawingCanvas.height = height;
 
-    // 设置绘画上下文属性
-    this.drawingCtx.lineCap = "round";
-    this.drawingCtx.lineJoin = "round";
+      // 设置绘画上下文属性
+      this.drawingCtx.lineCap = "round";
+      this.drawingCtx.lineJoin = "round";
 
-    console.log(`画布尺寸设置为: ${width}x${height}`);
+      // 确保视频画布背景透明，避免白屏
+      this.videoCtx.clearRect(0, 0, width, height);
+
+      console.log(`画布尺寸设置为: ${width}x${height}`);
+    }
   }
 
   initializeEventListeners() {
@@ -288,12 +297,67 @@ class HandTrackingDrawingApp {
 
       this.videoElement.srcObject = stream;
 
+      // 添加更多视频事件监听器用于调试
+      this.videoElement.addEventListener("loadstart", () => {
+        console.log("🎥 [视频调试] loadstart - 开始加载视频");
+      });
+
+      this.videoElement.addEventListener("loadedmetadata", () => {
+        console.log("🎥 [视频调试] loadedmetadata - 视频元数据已加载");
+        console.log(
+          `🎥 [视频调试] 视频尺寸: ${this.videoElement.videoWidth}x${this.videoElement.videoHeight}`
+        );
+        console.log(
+          `🎥 [视频调试] 视频元素尺寸: ${this.videoElement.clientWidth}x${this.videoElement.clientHeight}`
+        );
+      });
+
       this.videoElement.addEventListener("loadeddata", () => {
+        console.log("🎥 [视频调试] loadeddata - 视频数据已加载");
+        console.log(
+          `🎥 [视频调试] 视频可见性: ${
+            this.videoElement.style.display !== "none" ? "可见" : "隐藏"
+          }`
+        );
+        console.log(
+          `🎥 [视频调试] 视频透明度: ${
+            getComputedStyle(this.videoElement).opacity
+          }`
+        );
         this.startHandTracking();
         this.handStatus.textContent = "摄像头已连接，等待手部检测...";
       });
 
+      this.videoElement.addEventListener("canplay", () => {
+        console.log("🎥 [视频调试] canplay - 视频可以开始播放");
+      });
+
+      this.videoElement.addEventListener("playing", () => {
+        console.log("🎥 [视频调试] playing - 视频正在播放");
+      });
+
+      this.videoElement.addEventListener("error", (e) => {
+        console.error("🎥 [视频调试] 视频播放错误:", e);
+      });
+
       console.log("摄像头初始化成功");
+      console.log("🎥 [视频调试] 视频流已设置到视频元素");
+
+      // 临时修复：移除容器的白色背景，让视频可见
+      const containerElement = document.querySelector(
+        ".camera-drawing-container"
+      );
+      if (containerElement) {
+        console.log("🔧 [临时修复] 移除容器白色背景");
+        containerElement.style.background = "transparent";
+      }
+
+      // 临时修复：移除容器的白色背景，让视频可见
+      const container = document.querySelector(".camera-drawing-container");
+      if (container) {
+        console.log("🔧 [临时修复] 移除容器白色背景");
+        container.style.background = "transparent";
+      }
     } catch (error) {
       console.error("摄像头访问失败:", error);
       this.handleCameraError(error);
@@ -501,45 +565,47 @@ class HandTrackingDrawingApp {
     }
   }
 
-  // 新的手部追踪调度器，防止频繁重绘
+  // 新的手部追踪调度器，防止频繁重绘和闪烁
   scheduleHandTracking(results) {
     if (this.handTrackingPending) {
-      console.log("[调试] 手部追踪重绘被跳过 - 上次重绘仍在进行");
-      return;
+      return; // 静默跳过，减少日志噪音
     }
 
     this.handTrackingPending = true;
-    const startTime = Date.now();
-    setTimeout(() => {
+
+    // 使用requestAnimationFrame替代setTimeout，减少闪烁
+    requestAnimationFrame(() => {
       if (this.showHandTracking && this.isHandDetected) {
         const drawStart = Date.now();
         this.drawHandAnnotations(results);
         const drawTime = Date.now() - drawStart;
-        if (drawTime > 10) {
+        if (drawTime > 15) {
           console.warn(`[性能警告] 手部标注绘制耗时: ${drawTime}ms`);
         }
       }
       this.handTrackingPending = false;
-      const totalTime = Date.now() - startTime;
-      if (totalTime > 120) {
-        console.warn(`[性能警告] 手部追踪调度总耗时: ${totalTime}ms`);
-      }
-    }, 100); // 降低手部追踪显示频率到10fps
+    });
   }
 
   drawHandAnnotations(results) {
-    // 优化清除操作：只在必要时清除，减少闪烁
-    if (
-      !this.lastHandAnnotationTime ||
-      Date.now() - this.lastHandAnnotationTime > 100
-    ) {
-      this.videoCtx.clearRect(
+    // 避免频繁清除整个画布，改为智能清除
+    const now = Date.now();
+    const shouldClear =
+      !this.lastHandAnnotationTime || now - this.lastHandAnnotationTime > 150;
+
+    if (shouldClear) {
+      // 使用更温和的清除方式，避免白屏闪烁
+      this.videoCtx.save();
+      this.videoCtx.globalCompositeOperation = "destination-out";
+      this.videoCtx.globalAlpha = 1.0;
+      this.videoCtx.fillRect(
         0,
         0,
         this.videoCanvas.width,
         this.videoCanvas.height
       );
-      this.lastHandAnnotationTime = Date.now();
+      this.videoCtx.restore();
+      this.lastHandAnnotationTime = now;
     }
 
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
@@ -547,6 +613,7 @@ class HandTrackingDrawingApp {
 
       // 优化绘制：保存和恢复上下文状态，减少线宽提高性能
       this.videoCtx.save();
+      this.videoCtx.globalCompositeOperation = "source-over";
 
       // 绘制手部连接线 - 减少线宽提高性能
       drawConnectors(this.videoCtx, landmarks, HAND_CONNECTIONS, {
@@ -567,18 +634,23 @@ class HandTrackingDrawingApp {
 
   clearHandAnnotations() {
     // 避免频繁清除，只在必要时清除
-    if (this.lastClearTime && Date.now() - this.lastClearTime < 100) {
+    const now = Date.now();
+    if (this.lastClearTime && now - this.lastClearTime < 200) {
       return;
     }
 
-    this.lastClearTime = Date.now();
-    // 使用高效的清除方法
-    this.videoCtx.clearRect(
+    this.lastClearTime = now;
+    // 使用更温和的清除方法，避免白屏闪烁
+    this.videoCtx.save();
+    this.videoCtx.globalCompositeOperation = "destination-out";
+    this.videoCtx.globalAlpha = 1.0;
+    this.videoCtx.fillRect(
       0,
       0,
       this.videoCanvas.width,
       this.videoCanvas.height
     );
+    this.videoCtx.restore();
   }
 
   detectGesture() {
@@ -1011,36 +1083,46 @@ class HandTrackingDrawingApp {
       fps: 0,
     };
 
+    // 使用更温和的性能监控，避免频繁更新导致闪烁
     setInterval(() => {
       const currentTime = Date.now();
       const deltaTime = currentTime - this.performanceMetrics.lastTime;
-      this.performanceMetrics.fps = Math.round(
-        (this.performanceMetrics.frameCount * 1000) / deltaTime
-      );
+
+      // 避免除零错误和异常值
+      if (deltaTime > 0) {
+        this.performanceMetrics.fps = Math.round(
+          (this.performanceMetrics.frameCount * 1000) / deltaTime
+        );
+      }
+
       this.performanceMetrics.frameCount = 0;
       this.performanceMetrics.lastTime = currentTime;
 
-      // 更新性能显示
+      // 更新性能显示 - 使用requestAnimationFrame避免闪烁
       if (this.performanceStatus) {
-        this.performanceStatus.textContent = `FPS: ${this.performanceMetrics.fps}`;
+        requestAnimationFrame(() => {
+          this.performanceStatus.textContent = `FPS: ${this.performanceMetrics.fps}`;
 
-        // 根据FPS设置颜色
-        if (this.performanceMetrics.fps >= 25) {
-          this.performanceStatus.style.color = "#4CAF50"; // 绿色
-        } else if (this.performanceMetrics.fps >= 15) {
-          this.performanceStatus.style.color = "#FF9800"; // 橙色
-        } else {
-          this.performanceStatus.style.color = "#F44336"; // 红色
-        }
+          // 根据FPS设置颜色
+          if (this.performanceMetrics.fps >= 25) {
+            this.performanceStatus.style.color = "#4CAF50"; // 绿色
+          } else if (this.performanceMetrics.fps >= 15) {
+            this.performanceStatus.style.color = "#FF9800"; // 橙色
+          } else {
+            this.performanceStatus.style.color = "#F44336"; // 红色
+          }
+        });
       }
 
       // 更新调试面板
       if (this.debugMode && this.debugInfo) {
-        this.updateDebugPanel();
+        requestAnimationFrame(() => {
+          this.updateDebugPanel();
+        });
       }
 
-      // 性能警告
-      if (this.performanceMetrics.fps < 15) {
+      // 减少性能警告的频率，避免日志噪音
+      if (this.performanceMetrics.fps < 10 && this.performanceMetrics.fps > 0) {
         console.warn(`性能警告：当前FPS仅为 ${this.performanceMetrics.fps}`);
       }
     }, 1000);
@@ -1151,6 +1233,64 @@ class HandTrackingDrawingApp {
     setTimeout(() => {
       this.permissionStatus.classList.remove("show");
     }, 3000);
+  }
+
+  // 视频显示诊断函数
+  diagnoseVideoDisplay() {
+    console.log("🔍 [视频诊断] 开始诊断视频显示问题...");
+
+    const container = document.querySelector(".camera-drawing-container");
+    const video = this.videoElement;
+
+    // 检查容器
+    console.log("🔍 [视频诊断] 容器信息:");
+    console.log(
+      `  - 容器尺寸: ${container.clientWidth}x${container.clientHeight}`
+    );
+    console.log(`  - 容器背景: ${getComputedStyle(container).background}`);
+    console.log(`  - 容器可见性: ${getComputedStyle(container).visibility}`);
+
+    // 检查视频元素
+    console.log("🔍 [视频诊断] 视频元素信息:");
+    console.log(`  - 视频元素尺寸: ${video.clientWidth}x${video.clientHeight}`);
+    console.log(`  - 视频内容尺寸: ${video.videoWidth}x${video.videoHeight}`);
+    console.log(`  - 视频显示状态: ${getComputedStyle(video).display}`);
+    console.log(`  - 视频可见性: ${getComputedStyle(video).visibility}`);
+    console.log(`  - 视频透明度: ${getComputedStyle(video).opacity}`);
+    console.log(`  - 视频z-index: ${getComputedStyle(video).zIndex}`);
+    console.log(`  - 视频位置: ${getComputedStyle(video).position}`);
+    console.log(`  - 视频是否有流: ${video.srcObject ? "是" : "否"}`);
+    console.log(`  - 视频播放状态: ${video.paused ? "暂停" : "播放"}`);
+    console.log(`  - 视频就绪状态: ${video.readyState}`);
+
+    // 检查其他可能遮挡的元素
+    const canvas1 = document.getElementById("videoCanvas");
+    const canvas2 = document.getElementById("drawingCanvas");
+
+    console.log("🔍 [视频诊断] Canvas元素信息:");
+    console.log(`  - videoCanvas z-index: ${getComputedStyle(canvas1).zIndex}`);
+    console.log(
+      `  - drawingCanvas z-index: ${getComputedStyle(canvas2).zIndex}`
+    );
+    console.log(`  - videoCanvas背景: ${getComputedStyle(canvas1).background}`);
+    console.log(
+      `  - drawingCanvas背景: ${getComputedStyle(canvas2).background}`
+    );
+
+    // 尝试强制显示视频
+    console.log("🔍 [视频诊断] 尝试强制显示视频...");
+    video.style.display = "block";
+    video.style.visibility = "visible";
+    video.style.opacity = "1";
+    video.style.zIndex = "10";
+
+    // 检查是否有CSS覆盖
+    setTimeout(() => {
+      console.log("🔍 [视频诊断] 强制设置后的状态:");
+      console.log(`  - 视频显示状态: ${getComputedStyle(video).display}`);
+      console.log(`  - 视频z-index: ${getComputedStyle(video).zIndex}`);
+      console.log(`  - 视频透明度: ${getComputedStyle(video).opacity}`);
+    }, 100);
   }
 
   // 添加权限申请按钮
