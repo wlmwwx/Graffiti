@@ -1,31 +1,35 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="基于MediaPipe手部追踪技术的网页画图应用">
     <meta name="keywords" content="手部追踪,画图,MediaPipe,手势识别,网页应用">
     <meta name="author" content="Hand Tracking Drawing App">
-    
+
     <!-- 安全策略 -->
     <meta http-equiv="Permissions-Policy" content="camera=*">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdn.jsdelivr.net 'unsafe-inline' 'unsafe-eval'; media-src 'self'; camera 'self';">
-    
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' https://cdn.jsdelivr.net 'unsafe-inline' 'unsafe-eval'; media-src 'self'; camera 'self';">
+
     <!-- PWA配置 -->
     <meta name="theme-color" content="#667eea">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    
+
     <title>手部追踪画图应用 - 用手势进行创作</title>
     <link rel="stylesheet" href="styles.css">
-    
+
     <!-- 预加载关键资源 -->
     <link rel="preload" href="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" as="script">
     <link rel="preload" href="app.js" as="script">
-    
+
     <!-- Favicon -->
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
 </head>
+
 <body>
     <div class="app-container">
         <!-- 头部工具栏 -->
@@ -34,24 +38,26 @@
                 <button id="clearCanvas" class="tool-btn" title="清除画布 (快捷键: C)">清除画布</button>
                 <button id="saveImage" class="tool-btn" title="保存图片">保存图片</button>
                 <button id="toggleTracking" class="tool-btn" title="切换手部追踪显示">显示追踪</button>
+                <button id="performanceMode" class="tool-btn" title="切换性能模式">高性能模式</button>
             </div>
-            
+
             <!-- 画笔工具 -->
             <div class="tool-group">
                 <button id="brushTool" class="tool-btn active" data-tool="brush" title="画笔工具 (快捷键: B)">画笔</button>
                 <button id="eraserTool" class="tool-btn" data-tool="eraser" title="橡皮擦工具 (快捷键: E)">橡皮擦</button>
             </div>
-            
+
             <!-- 画笔大小 -->
             <div class="tool-group">
                 <label for="brushSize">画笔大小:</label>
                 <input type="range" id="brushSize" min="1" max="20" value="5" title="调节画笔大小">
                 <span id="brushSizeValue">5</span>
             </div>
-            
+
             <!-- 调色板 -->
             <div class="tool-group color-palette">
-                <div class="color-option active" data-color="#000000" style="background-color: #000000;" title="黑色"></div>
+                <div class="color-option active" data-color="#000000" style="background-color: #000000;" title="黑色">
+                </div>
                 <div class="color-option" data-color="#FF0000" style="background-color: #FF0000;" title="红色"></div>
                 <div class="color-option" data-color="#00FF00" style="background-color: #00FF00;" title="绿色"></div>
                 <div class="color-option" data-color="#0000FF" style="background-color: #0000FF;" title="蓝色"></div>
@@ -71,17 +77,31 @@
                 <video id="videoElement" autoplay muted playsinline></video>
                 <canvas id="videoCanvas"></canvas>
                 <canvas id="drawingCanvas"></canvas>
-                
+
                 <!-- 状态指示器 -->
                 <div class="status-indicator">
                     <div id="handStatus" class="hand-status">等待手部检测...</div>
                     <div id="gestureStatus" class="gesture-status">手势: 无</div>
+                    <div id="performanceStatus" class="performance-status">FPS: --</div>
                 </div>
-                
+
                 <!-- 绘画信息 -->
                 <div class="drawing-info">
                     <div class="current-tool">工具: <span id="currentTool">画笔</span></div>
-                    <div class="current-color">颜色: <span id="currentColor" style="background-color: #000000;"></span></div>
+                    <div class="current-color">颜色: <span id="currentColor" style="background-color: #000000;"></span>
+                    </div>
+                </div>
+
+                <!-- 调试性能面板 -->
+                <div id="debugPanel" class="debug-panel" style="display: none;">
+                    <h4>🔧 性能调试面板</h4>
+                    <div id="debugInfo">
+                        <div>MediaPipe处理: <span id="mediapipeTime">--</span>ms</div>
+                        <div>Canvas重绘: <span id="canvasTime">--</span>ms</div>
+                        <div>绘画延迟: <span id="drawingLatency">--</span>ms</div>
+                        <div>跳帧数: <span id="frameSkips">--</span></div>
+                    </div>
+                    <button id="toggleDebug" class="tool-btn">关闭调试</button>
                 </div>
             </div>
         </main>
@@ -105,7 +125,7 @@
                 <span class="gesture-icon">👊</span>
                 <span class="gesture-desc">握拳: 停止绘画</span>
             </div>
-            
+
             <!-- 键盘快捷键说明 -->
             <div class="keyboard-shortcuts">
                 <h4>快捷键</h4>
@@ -113,7 +133,7 @@
                 <div class="shortcut-item">E - 橡皮擦</div>
                 <div class="shortcut-item">C - 清除画布</div>
             </div>
-            
+
             <!-- 性能提示 -->
             <div class="performance-tip">
                 <h4>💡 性能提示</h4>
@@ -140,9 +160,12 @@
 
     <!-- 加载MediaPipe和应用脚本 -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"
+        crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="app.js"></script>
 </body>
+
 </html>
